@@ -60,7 +60,7 @@ class OpenTSDBContext(hBaseContext: HBaseContext)
     tagVUIDs.foreach(m => logInfo("tagVUID: " + m._1 + " => " + m._2.mkString(", ")))
 
     // all tags must exist
-    require(tags.size == tagKUIDs.size && tags.filter(x => !tagVUIDs.contains(x._2)).isEmpty,
+    require(tags.size == tagKUIDs.size && tags.exists(x => !tagVUIDs.contains(x._2)),
       "Can't find keys or values")
     // TODO print missing values
 
@@ -164,7 +164,7 @@ class OpenTSDBContext(hBaseContext: HBaseContext)
 
     val tagkv: List[Array[Byte]] = tagKUIDs
       .map(k => (k._2, tagVUIDs(tags(k._1)))) // key(byte Array), value(byte Array)
-      .map(l => (l._1 ++ l._2)) // key + value
+      .map(l => l._1 ++ l._2) // key + value
       .toList
       .sorted(Ordering.by((_: Array[Byte]).toIterable))
 
@@ -184,7 +184,7 @@ class OpenTSDBContext(hBaseContext: HBaseContext)
       val qualifier = parseQualifier(qualifierBytes, i, step)
 
       val timeOffset = getOffset(qualifier)
-      val isFloat = (((qualifier >> 3) & 1) == 1)
+      val isFloat = ((qualifier >> 3) & 1) == 1
       val valueByteLength = (qualifier & 7) + 1
 
       val value = parseValue(valueBytes, index, isFloat, valueByteLength)
@@ -236,8 +236,8 @@ class OpenTSDBContext(hBaseContext: HBaseContext)
 
     val config = tsdbuidConfig(Array(
       metricName,
-      tags.map(_._1).mkString("|"),
-      tags.map(_._2).mkString("|")))
+      tags.keys.mkString("|"),
+      tags.values.mkString("|")))
 
     val tsdbUID = readTable(config)
 
@@ -252,7 +252,7 @@ class OpenTSDBContext(hBaseContext: HBaseContext)
     : RDD[(ImmutableBytesWritable, Result)] = {
 
     val config = tsdbConfig(metricsUID.last,
-      if (tagKV.size != 0) Option(tagKV.flatten.toArray) else None,
+      if (tagKV.nonEmpty) Option(tagKV.flatten.toArray) else None,
       if (startdate != "*") Option(startdate) else None,
       if (enddate != "*") Option(enddate) else None
     )
@@ -287,15 +287,15 @@ class OpenTSDBContext(hBaseContext: HBaseContext)
     config.set(TableInputFormat.INPUT_TABLE, "tsdb")
 
     config.set(TSDBScan.METRICS, bytes2hex(metricUID))
-    if (tagkv != None) {
+    if (tagkv.isDefined) {
       config.set(TSDBScan.TAGKV, bytes2hex(tagkv.get))
     }
 
-    if (startdate != None) {
+    if (startdate.isDefined) {
       config.set(TSDBScan.SCAN_TIMERANGE_START, getTime(startdate.get))
     }
 
-    if (enddate != None) {
+    if (enddate.isDefined) {
       config.set(TSDBScan.SCAN_TIMERANGE_END, getTime(enddate.get))
     }
 

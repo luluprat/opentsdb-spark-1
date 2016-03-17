@@ -36,14 +36,6 @@ public class TSDBScan {
      * The opentsdb metric to be retrived.
      */
     public static final String TAGKV = "net.opentsdb.tagkv";
-    /**
-     * The tag keys for the associated metric (space seperated).
-     */
-    public static final String TSDB_STARTKEY = "net.opentsdb.start";
-    /**
-     * The tag values for the tag keys (space seperated).
-     */
-    public static final String TSDB_ENDKEY = "net.opentsdb.end";
 
     /** Set to false to disable server-side caching of blocks for this scan. */
     public static final String SCAN_CACHEBLOCKS = "hbase.mapreduce.scan.cacheblocks";

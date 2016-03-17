@@ -11,7 +11,7 @@ Module for accessing OpenTSDB data through Spark.
   1. wget https://github.com/BigTS/opentsdb-spark/archive/master.zip
   2. unzip master.zip
   3. cd opentsdb-spark-master
-  4. sbt eclipse (if you dont have sbt, it can be installed from www.scala-sbt.org)
+  4. sbt eclipse (if you don't have sbt, it can be installed from www.scala-sbt.org)
   5. The project can be now imported into eclipse
 
 ##On your cluster.

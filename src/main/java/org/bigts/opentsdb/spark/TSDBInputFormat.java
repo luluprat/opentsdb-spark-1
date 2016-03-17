@@ -34,16 +34,14 @@ public class TSDBInputFormat extends TableInputFormat implements Configurable {
     @Override
     public void setConf(Configuration configuration) {
         super.setConf(configuration);
-        Configuration conf = configuration;
-
-        String tableName = conf.get(INPUT_TABLE);
+        String tableName = configuration.get(INPUT_TABLE);
         try {
             //	setHTable(new HTable(new Configuration(conf), tableName));
         } catch (Exception e) {
             LOG.error(StringUtils.stringifyException(e));
         }
 
-        Scan scan = TSDBScan.createScan(conf);
+        Scan scan = TSDBScan.createScan(configuration);
         setScan(scan);
     }
 }
