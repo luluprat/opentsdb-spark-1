@@ -40,7 +40,7 @@ class OpenTSDBContext(hBaseContext: HBaseContext)
       tagsKeysValues: String,
       startDate: String,
       endDate: String)
-    : RDD[(Long, Float)] = {
+    : RDD[Point] = {
     logInfo("Generating RDD ...")
 
     val tags: Map[String, String] = parseTags(tagsKeysValues)
@@ -67,61 +67,64 @@ class OpenTSDBContext(hBaseContext: HBaseContext)
     val tagKV = joinTagKeysWithValues(tags, tagKUIDs, tagVUIDs)
 
     val tsdb = read_tsdb_table(metricsUID, tagKV, startDate, endDate)
-    val timeSeriesRDD: RDD[(Long, Float)] = decode_tsdb_table(tsdb)
+    val timeSeriesRDD: RDD[Point] = decode_tsdb_table(tsdb)
 
     timeSeriesRDD
   }
 
-  private def decode_tsdb_table(tsdb: RDD[(ImmutableBytesWritable, Result)]): RDD[(Long, Float)] = {
+  private def decodeTSDBRow(row: (ImmutableBytesWritable, Result)): Seq[Point] = {
+    val rowKey = row._1
+    val value = row._2
+
+    // columns from 3-7 (the base time)
+    val basetime = ByteBuffer.wrap(Arrays.copyOfRange(rowKey.copyBytes(), 3, 7)).getInt
+
+    val familyMap = value.getFamilyMap("t".getBytes())
+    val iterator = familyMap.entrySet().iterator()
+
+    val points = new ArrayBuffer[Point]
+
+    while (iterator.hasNext()) {
+      val next = iterator.next()
+
+      val qualifierBytes: Array[Byte] = next.getKey()
+      val valueBytes = next.getValue()
+
+      // Column Quantifiers are stored as follows:
+      // if num of bytes=2: 12 bits (delta timestamp value in sec) + 4 bits flag
+      // if num of bytes=4: 4 bits flag(must be 1111) + 22 bits (delta timestamp value in ms) +
+      //                       2 bits reserved + 4 bits flag
+      // last 4 bits flag = (1 bit (int 0 | float 1) + 3 bits (length of value bytes - 1))
+
+      // if num of bytes>4 & even: columns with compacted for the hour, with each qualifier having 2 bytes
+      // TODO make sure that (qualifier only has 2 bytes)
+
+      // if num of bytes is odd: Annotations or Other Objects
+
+      if (qualifierBytes.length == 2) {
+        // 2 bytes qualifier
+        parseValues(qualifierBytes, valueBytes, basetime, 2, (x => x >> 4), points)
+
+      } else if (qualifierBytes.length == 4 && is4BytesQualifier(qualifierBytes)) {
+        // 4 bytes qualifier
+        parseValues(qualifierBytes, valueBytes, basetime, 4, (x => (x << 4) >> 10), points)
+
+      } else if (qualifierBytes.length % 2 == 0) {
+        // compacted columns
+        parseValues(qualifierBytes, valueBytes, basetime, 2, (x => x >> 4), points)
+
+      } else {
+        // TODO (Annotations or Other Objects)
+        throw new RuntimeException("Annotations or Other Objects not supported yet")
+      }
+    }
+
+    points
+  }
+
+  private def decode_tsdb_table(tsdb: RDD[(ImmutableBytesWritable, Result)]): RDD[Point] = {
     //Decoding retrieved data into RDD
-
-    val timeSeriesRDD = tsdb
-      // columns from 3-7 (the base time)
-      .map(kv => (Arrays.copyOfRange(kv._1.copyBytes(), 3, 7), kv._2.getFamilyMap("t".getBytes())))
-      .flatMap({
-        kv =>
-          val basetime: Int = ByteBuffer.wrap(kv._1).getInt
-          val iterator: util.Iterator[Entry[Array[Byte], Array[Byte]]] = kv._2.entrySet().iterator()
-          val row = new ArrayBuffer[(Long, Float)]
-
-          while (iterator.hasNext()) {
-            val next = iterator.next()
-
-            val qualifierBytes: Array[Byte] = next.getKey()
-            val valueBytes = next.getValue()
-
-            // Column Quantifiers are stored as follows:
-            // if num of bytes=2: 12 bits (delta timestamp value in sec) + 4 bits flag
-            // if num of bytes=4: 4 bits flag(must be 1111) + 22 bits (delta timestamp value in ms) +
-            //                       2 bits reserved + 4 bits flag
-            // last 4 bits flag = (1 bit (int 0 | float 1) + 3 bits (length of value bytes - 1))
-
-            // if num of bytes>4 & even: columns with compacted for the hour, with each qualifier having 2 bytes
-            // TODO make sure that (qualifier only has 2 bytes)
-
-            // if num of bytes is odd: Annotations or Other Objects
-
-            if (qualifierBytes.length == 2) {
-              // 2 bytes qualifier
-              parseValues(qualifierBytes, valueBytes, basetime, 2, (x => x >> 4), row)
-
-            } else if (qualifierBytes.length == 4 && is4BytesQualifier(qualifierBytes)) {
-              // 4 bytes qualifier
-              parseValues(qualifierBytes, valueBytes, basetime, 4, (x => (x << 4) >> 10), row)
-
-            } else if (qualifierBytes.length % 2 == 0) {
-              // compacted columns
-              parseValues(qualifierBytes, valueBytes, basetime, 2, (x => x >> 4), row)
-
-            } else {
-              // TODO (Annotations or Other Objects)
-              throw new RuntimeException("Annotations or Other Objects not supported yet")
-            }
-          }
-
-          row
-      })
-
+    val timeSeriesRDD = tsdb.flatMap(decodeTSDBRow)
     timeSeriesRDD
   }
 
@@ -174,7 +177,7 @@ class OpenTSDBContext(hBaseContext: HBaseContext)
       basetime: Int,
       step: Int,
       getOffset: Int => Int,
-      result: ArrayBuffer[(Long, Float)]) = {
+      result: ArrayBuffer[Point]) = {
 
     var index = 0
     for (i <- 0 until qualifierBytes.length by step) {
@@ -185,7 +188,7 @@ class OpenTSDBContext(hBaseContext: HBaseContext)
       val valueByteLength = (qualifier & 7) + 1
 
       val value = parseValue(valueBytes, index, isFloat, valueByteLength)
-      result += ((basetime + timeOffset, value))
+      result += Point(basetime + timeOffset, value)
 
       index = index + valueByteLength
     }
@@ -327,3 +330,5 @@ class OpenTSDBContext(hBaseContext: HBaseContext)
   }
 
 }
+
+case class Point(timeStamp: Long, value: Double)

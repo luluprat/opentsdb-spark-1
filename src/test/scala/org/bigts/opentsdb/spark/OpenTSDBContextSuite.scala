@@ -14,14 +14,14 @@ class OpenTSDBContextSuite extends FunSuite with ShouldMatchers {
   }
 
   def testCase(metric: String, tagVal: String, startD: String, endD: String,
-               verify: (RDD[(Long, Float)]) => Unit): Unit = {
+               verify: (RDD[Point]) => Unit): Unit = {
     val sc = createSC()
 
     val config = HBaseConfiguration.create()
 
     val opentsdb = new OpenTSDBContext(sc, config)
 
-    val rdd: RDD[(Long, Float)] = opentsdb.generateRDD(
+    val rdd: RDD[Point] = opentsdb.generateRDD(
       metricName = metric,
       tagsKeysValues = tagVal,
       startDate = startD,
@@ -56,11 +56,11 @@ class OpenTSDBContextSuite extends FunSuite with ShouldMatchers {
     })
   }
 
-  def printRDD(rdd: RDD[(Long, Float)]) = {
+  def printRDD(rdd: RDD[Point]) = {
     //Total number of points
     println("TimeSeries Data Count: " + rdd.count)
 
     //Collect & Print the data
-    rdd.collect.foreach(point => println(point._1 + ", " + point._2))
+    rdd.collect.foreach(point => println(point.timeStamp + ", " + point.value))
   }
 }
